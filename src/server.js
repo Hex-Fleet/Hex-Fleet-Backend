@@ -41,6 +41,92 @@ async function getDevice(request, reply) {
 
 app.get('/health', async () => ({ status: 'ok', service: 'hexfleet-api', timestamp: now().toISOString() }));
 
+function startOfToday() {
+  const date = new Date();
+  date.setHours(0, 0, 0, 0);
+  return date;
+}
+
+function deviceIsOnline(lastApiDataReceived) {
+  return Boolean(lastApiDataReceived && now().getTime() - new Date(lastApiDataReceived).getTime() <= 10 * 60 * 1000);
+}
+
+async function dashboardSnapshot() {
+  const today = startOfToday();
+  const [devices, students, attendanceToday, recentAttendance, gpsLogs, fuelSensors] = await Promise.all([
+    prisma.microcontroller.findMany({ orderBy: { createdAt: 'asc' }, include: { busMappings: { where: { isActive: true }, include: { bus: true } } } }),
+    prisma.student.count({ where: { isActive: true } }),
+    prisma.studentAttendanceLog.count({ where: { scannedAt: { gte: today } } }),
+    prisma.studentAttendanceLog.findMany({
+      where: { scannedAt: { gte: today } }, orderBy: { scannedAt: 'desc' }, take: 20,
+      include: { student: true, microcontroller: true, bus: true }
+    }),
+    prisma.gpsLog.findMany({ orderBy: { createdAt: 'desc' }, take: 20, include: { microcontroller: true } }),
+    prisma.fuelSensor.findMany({ orderBy: { lastUpdatedAt: 'desc' }, include: { microcontroller: true } })
+  ]);
+
+  const latestGps = new Map();
+  for (const log of gpsLogs) if (!latestGps.has(log.microcontrollerId)) latestGps.set(log.microcontrollerId, log);
+  const latestFuel = new Map(fuelSensors.map((sensor) => [sensor.microcontrollerId, sensor]));
+  const deviceRows = devices.map((device) => {
+    const gps = latestGps.get(device.transId);
+    const fuel = latestFuel.get(device.transId);
+    const mapping = device.busMappings[0];
+    return {
+      transId: device.transId,
+      macAddress: device.macAddress,
+      name: device.name,
+      model: device.model,
+      bus: mapping?.bus?.busNumber ?? null,
+      healthStatus: device.healthStatus,
+      online: deviceIsOnline(device.lastApiDataReceived),
+      lastApiDataReceived: device.lastApiDataReceived,
+      lastHealthCheckTime: device.lastHealthCheckTime,
+      gps: gps ? { latitude: gps.latitude, longitude: gps.longitude, speed: gps.speed, measuredAt: gps.measuredAt } : null,
+      fuel: fuel ? { value: fuel.lastValueMeasured, litres: fuel.lastLitresMeasured, updatedAt: fuel.lastUpdatedAt } : null
+    };
+  });
+  return {
+    metrics: {
+      activeVehicles: deviceRows.filter((device) => device.online).length,
+      totalVehicles: deviceRows.length,
+      studentsOnboard: 0,
+      averageFuel: fuelSensors.length ? fuelSensors.reduce((sum, sensor) => sum + Number(sensor.lastLitresMeasured ?? 0), 0) / fuelSensors.length : null,
+      attendanceToday
+    },
+    signal: {
+      online: deviceRows.filter((device) => device.online).length,
+      delayed: deviceRows.filter((device) => device.healthStatus === 'DEGRADED' || (!device.online && device.lastApiDataReceived)).length,
+      offline: deviceRows.filter((device) => !device.online).length
+    },
+    devices: deviceRows,
+    recentAttendance: recentAttendance.map((entry) => ({
+      transId: entry.transId, scannedAt: entry.scannedAt, cardUid: entry.cardUid, status: entry.attendanceStatus,
+      student: entry.student ? `${entry.student.firstName}${entry.student.lastName ? ` ${entry.student.lastName}` : ''}` : 'Unknown card',
+      bus: entry.bus?.busNumber ?? 'Unmapped', macAddress: entry.microcontroller.macAddress
+    })),
+    students
+  };
+}
+
+app.get('/api/dashboard/overview', async () => ({ success: true, data: await dashboardSnapshot() }));
+app.get('/api/dashboard/devices', async () => {
+  const snapshot = await dashboardSnapshot();
+  return { success: true, data: snapshot.devices };
+});
+app.get('/api/dashboard/students', async () => {
+  const records = await prisma.student.findMany({ where: { isActive: true }, orderBy: { createdAt: 'desc' }, take: 500, include: { rfidMappings: { where: { isActive: true } } } });
+  return { success: true, data: records.map((student) => ({ ...student, rfidMappings: student.rfidMappings.map((mapping) => ({ transId: mapping.transId, cardUid: mapping.cardUid })) })) };
+});
+app.get('/api/dashboard/attendance', async () => {
+  const records = await prisma.studentAttendanceLog.findMany({ orderBy: { scannedAt: 'desc' }, take: 500, include: { student: true, bus: true, microcontroller: true } });
+  return { success: true, data: records.map((entry) => ({
+    transId: entry.transId, scannedAt: entry.scannedAt, cardUid: entry.cardUid, status: entry.attendanceStatus,
+    student: entry.student ? `${entry.student.firstName}${entry.student.lastName ? ` ${entry.student.lastName}` : ''}` : 'Unknown card',
+    bus: entry.bus?.busNumber ?? 'Unmapped', macAddress: entry.microcontroller.macAddress
+  })) };
+});
+
 app.post('/api/:macId/health', async (request, reply) => {
   const device = await getDevice(request, reply);
   if (!device) return;
