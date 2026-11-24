@@ -137,9 +137,39 @@ app.post('/api/admin/microcontrollers', async (request, reply) => {
   const existing = await prisma.microcontroller.findUnique({ where: { macAddress } });
   if (existing) return reply.code(409).send({ success: false, error: 'A device with this MAC address is already registered' });
   const settingsJson = { healthCheckIntervalMinutes: Math.max(1, Number(body.healthCheckIntervalMinutes) || 10), telemetryIntervalMinutes: Math.max(1, Number(body.telemetryIntervalMinutes) || 1), debugHotspotMinutes: 10 };
-  const device = await prisma.microcontroller.create({ data: { name, model, macAddress, settingsJson, isFuelEnabled: Boolean(body.isFuelEnabled), isRfidEnabled: Boolean(body.isRfidEnabled), isGpsEnabled: Boolean(body.isGpsEnabled), healthStatus: 'UNKNOWN', createdBy: String(body.createdBy ?? 'admin').trim() || 'admin' } });
+  const device = await prisma.microcontroller.create({ data: { name, model, macAddress, settingsJson, isFuelEnabled: Boolean(body.isFuelEnabled), isRfidEnabled: Boolean(body.isRfidEnabled), isGpsEnabled: Boolean(body.isGpsEnabled), healthStatus: 'UNKNOWN', createdBy: String(body.createdBy ?? 'admin').trim() || 'admin', fuelSensors: body.isFuelEnabled ? { create: { name: `${name} A22 fuel sensor`, model: String(body.fuelModel ?? 'A22 ultrasonic'), createdBy: 'admin' } } : undefined, gpsSensors: body.isGpsEnabled ? { create: { name: `${name} GPS sensor`, model: String(body.gpsModel ?? 'GPS'), createdBy: 'admin' } } : undefined, rfidSensors: body.isRfidEnabled ? { create: { name: `${name} RFID reader`, model: String(body.rfidModel ?? 'RFID'), createdBy: 'admin' } } : undefined } });
   return reply.code(201).send({ success: true, data: { transId: device.transId, name: device.name, model: device.model, macAddress: device.macAddress, settingsJson: device.settingsJson, isFuelEnabled: device.isFuelEnabled, isRfidEnabled: device.isRfidEnabled, isGpsEnabled: device.isGpsEnabled, isActive: device.isActive } });
 });
+
+app.get('/api/admin/buses', async () => ({ success: true, data: await prisma.bus.findMany({ where: { isActive: true }, orderBy: { createdAt: 'desc' }, include: { controllerMappings: { where: { isActive: true }, include: { microcontroller: true } } } }) }));
+app.post('/api/admin/buses', async (request, reply) => {
+  const body = request.body ?? {};
+  const name = String(body.name ?? '').trim(); const busNumber = String(body.busNumber ?? '').trim();
+  if (!name || !busNumber) return reply.code(400).send({ success: false, error: 'name and busNumber are required' });
+  const bus = await prisma.bus.create({ data: { name, busNumber, registrationNo: String(body.registrationNo ?? '').trim() || null, createdBy: 'admin' } });
+  return reply.code(201).send({ success: true, data: bus });
+});
+app.post('/api/admin/buses/:busId/controllers', async (request, reply) => {
+  const busId = String(request.params.busId); const microcontrollerId = String(request.body?.microcontrollerId ?? '');
+  if (!microcontrollerId) return reply.code(400).send({ success: false, error: 'microcontrollerId is required' });
+  const mapping = await prisma.busControllerMapping.upsert({ where: { busId_microcontrollerId: { busId, microcontrollerId } }, update: { isActive: true, lastUpdatedBy: 'admin' }, create: { busId, microcontrollerId, createdBy: 'admin' } });
+  return reply.code(201).send({ success: true, data: mapping });
+});
+app.post('/api/admin/students', async (request, reply) => {
+  const body = request.body ?? {}; const firstName = String(body.firstName ?? '').trim();
+  if (!firstName) return reply.code(400).send({ success: false, error: 'firstName is required' });
+  const student = await prisma.student.create({ data: { firstName, lastName: String(body.lastName ?? '').trim() || null, admissionNo: String(body.admissionNo ?? '').trim() || null, institution: String(body.institution ?? '').trim() || null, className: String(body.className ?? '').trim() || null, phone: String(body.phone ?? '').trim() || null, createdBy: 'admin' } });
+  return reply.code(201).send({ success: true, data: student });
+});
+app.post('/api/admin/students/:studentId/rfid', async (request, reply) => {
+  const studentId = String(request.params.studentId); const cardUid = String(request.body?.cardUid ?? '').replace(/\s/g, '').toUpperCase();
+  if (!cardUid) return reply.code(400).send({ success: false, error: 'cardUid is required' });
+  const existing = await prisma.studentRfidMapping.findUnique({ where: { cardUid } });
+  if (existing && existing.studentId !== studentId) return reply.code(409).send({ success: false, error: 'This RFID card is already mapped to another student' });
+  const mapping = existing ? await prisma.studentRfidMapping.update({ where: { transId: existing.transId }, data: { isActive: true, lastUpdatedBy: 'admin' } }) : await prisma.studentRfidMapping.create({ data: { studentId, cardUid, createdBy: 'admin' } });
+  return reply.code(201).send({ success: true, data: mapping });
+});
+app.get('/api/admin/rfid-logs', async () => ({ success: true, data: await prisma.rfidLog.findMany({ orderBy: { scannedAt: 'desc' }, take: 200, include: { microcontroller: true, rfidSensor: true } }) }));
 
 app.post('/api/:macId/health', async (request, reply) => {
   const device = await getDevice(request, reply);
