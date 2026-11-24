@@ -127,6 +127,20 @@ app.get('/api/dashboard/attendance', async () => {
   })) };
 });
 
+app.post('/api/admin/microcontrollers', async (request, reply) => {
+  const body = request.body ?? {};
+  const name = String(body.name ?? '').trim();
+  const model = String(body.model ?? '').trim() || null;
+  const macAddress = normalizeMac(body.macAddress ?? body.macId);
+  if (!name) return reply.code(400).send({ success: false, error: 'name is required' });
+  if (!/^[0-9A-F]{12}$/.test(macAddress)) return reply.code(400).send({ success: false, error: 'macAddress must contain 12 hexadecimal characters' });
+  const existing = await prisma.microcontroller.findUnique({ where: { macAddress } });
+  if (existing) return reply.code(409).send({ success: false, error: 'A device with this MAC address is already registered' });
+  const settingsJson = { healthCheckIntervalMinutes: Math.max(1, Number(body.healthCheckIntervalMinutes) || 10), telemetryIntervalMinutes: Math.max(1, Number(body.telemetryIntervalMinutes) || 1), debugHotspotMinutes: 10 };
+  const device = await prisma.microcontroller.create({ data: { name, model, macAddress, settingsJson, isFuelEnabled: Boolean(body.isFuelEnabled), isRfidEnabled: Boolean(body.isRfidEnabled), isGpsEnabled: Boolean(body.isGpsEnabled), healthStatus: 'UNKNOWN', createdBy: String(body.createdBy ?? 'admin').trim() || 'admin' } });
+  return reply.code(201).send({ success: true, data: { transId: device.transId, name: device.name, model: device.model, macAddress: device.macAddress, settingsJson: device.settingsJson, isFuelEnabled: device.isFuelEnabled, isRfidEnabled: device.isRfidEnabled, isGpsEnabled: device.isGpsEnabled, isActive: device.isActive } });
+});
+
 app.post('/api/:macId/health', async (request, reply) => {
   const device = await getDevice(request, reply);
   if (!device) return;
