@@ -33,6 +33,17 @@ const asNumber = (value) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 };
+function listQuery(items, query = {}) {
+  const requested = query.page !== undefined || query.pageSize !== undefined || query.search !== undefined;
+  if (!requested) return items;
+  const pageSize = Math.min(100, Math.max(1, Number(query.pageSize) || 25));
+  const page = Math.max(1, Number(query.page) || 1);
+  const search = String(query.search ?? '').trim().toLowerCase();
+  const filtered = search ? items.filter((item) => JSON.stringify(item).toLowerCase().includes(search)) : items;
+  const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const safePage = Math.min(page, pages);
+  return { items: filtered.slice((safePage - 1) * pageSize, safePage * pageSize), pagination: { page: safePage, pageSize, pages, total: filtered.length, search } };
+}
 
 async function getDevice(request, reply) {
   const macAddress = normalizeMac(request.params.macId);
@@ -123,21 +134,21 @@ async function dashboardSnapshot() {
 }
 
 app.get('/api/dashboard/overview', async () => ({ success: true, data: await dashboardSnapshot() }));
-app.get('/api/dashboard/devices', async () => {
+app.get('/api/dashboard/devices', async (request) => {
   const snapshot = await dashboardSnapshot();
-  return { success: true, data: snapshot.devices };
+  return { success: true, data: listQuery(snapshot.devices, request.query) };
 });
-app.get('/api/dashboard/students', async () => {
+app.get('/api/dashboard/students', async (request) => {
   const records = await prisma.student.findMany({ where: { isActive: true }, orderBy: { createdAt: 'desc' }, take: 500, include: { rfidMappings: { where: { isActive: true } } } });
-  return { success: true, data: records.map((student) => ({ ...student, rfidMappings: student.rfidMappings.map((mapping) => ({ transId: mapping.transId, cardUid: mapping.cardUid })) })) };
+  return { success: true, data: listQuery(records.map((student) => ({ ...student, rfidMappings: student.rfidMappings.map((mapping) => ({ transId: mapping.transId, cardUid: mapping.cardUid })) })), request.query) };
 });
-app.get('/api/dashboard/attendance', async () => {
+app.get('/api/dashboard/attendance', async (request) => {
   const records = await prisma.studentAttendanceLog.findMany({ orderBy: { scannedAt: 'desc' }, take: 500, include: { student: true, bus: true, microcontroller: true } });
-  return { success: true, data: records.map((entry) => ({
+  return { success: true, data: listQuery(records.map((entry) => ({
     transId: entry.transId, scannedAt: entry.scannedAt, cardUid: entry.cardUid, status: entry.attendanceStatus,
     student: entry.student ? `${entry.student.firstName}${entry.student.lastName ? ` ${entry.student.lastName}` : ''}` : 'Unknown card',
     bus: entry.bus?.busNumber ?? 'Unmapped', macAddress: entry.microcontroller.macAddress
-  })) };
+  })), request.query) };
 });
 
 app.post('/api/admin/microcontrollers', async (request, reply) => {
@@ -183,9 +194,9 @@ app.post('/api/admin/students/:studentId/rfid', async (request, reply) => {
   return reply.code(201).send({ success: true, data: mapping });
 });
 app.get('/api/admin/rfid-logs', async () => ({ success: true, data: await prisma.rfidLog.findMany({ orderBy: { scannedAt: 'desc' }, take: 200, include: { microcontroller: true, rfidSensor: true } }) }));
-app.get('/api/dashboard/buses', async () => {
+app.get('/api/dashboard/buses', async (request) => {
   const buses = await prisma.bus.findMany({ where: { isActive: true }, orderBy: { createdAt: 'desc' }, include: { controllerMappings: { where: { isActive: true }, include: { microcontroller: true } } } });
-  return { success: true, data: buses.map((bus) => ({ transId: bus.transId, name: bus.name, busNumber: bus.busNumber, registrationNo: bus.registrationNo, controller: bus.controllerMappings[0]?.microcontroller ? { transId: bus.controllerMappings[0].microcontroller.transId, name: bus.controllerMappings[0].microcontroller.name, macAddress: bus.controllerMappings[0].microcontroller.macAddress, online: deviceIsOnline(bus.controllerMappings[0].microcontroller.lastApiDataReceived) } : null })) };
+  return { success: true, data: listQuery(buses.map((bus) => ({ transId: bus.transId, name: bus.name, busNumber: bus.busNumber, registrationNo: bus.registrationNo, controller: bus.controllerMappings[0]?.microcontroller ? { transId: bus.controllerMappings[0].microcontroller.transId, name: bus.controllerMappings[0].microcontroller.name, macAddress: bus.controllerMappings[0].microcontroller.macAddress, online: deviceIsOnline(bus.controllerMappings[0].microcontroller.lastApiDataReceived) } : null })), request.query) };
 });
 app.get('/api/dashboard/buses/:busId', async (request, reply) => {
   const bus = await prisma.bus.findUnique({ where: { transId: request.params.busId }, include: { controllerMappings: { where: { isActive: true }, include: { microcontroller: true } } } });
@@ -200,11 +211,14 @@ app.get('/api/dashboard/buses/:busId', async (request, reply) => {
   ]);
   return { success: true, data: { transId: bus.transId, name: bus.name, busNumber: bus.busNumber, registrationNo: bus.registrationNo, controller: { name: controller.name, macAddress: controller.macAddress, online: deviceIsOnline(controller.lastApiDataReceived), lastHealthCheckTime: controller.lastHealthCheckTime }, gps: gpsLogs.map((log) => ({ transId: log.transId, latitude: log.latitude, longitude: log.longitude, speed: log.speed, measuredAt: log.measuredAt })), fuel: fuel ? { litres: fuel.lastLitresMeasured, value: fuel.lastValueMeasured, updatedAt: fuel.lastUpdatedAt } : null, mappedScans: mappedScans.map((scan) => ({ transId: scan.transId, scannedAt: scan.scannedAt, cardUid: scan.cardUid, status: scan.attendanceStatus, student: scan.student ? `${scan.student.firstName}${scan.student.lastName ? ` ${scan.student.lastName}` : ''}` : null })), unmappedScanCount } };
 });
-app.get('/api/admin/raw-tables', async () => {
+app.get('/api/admin/raw-tables', async (request) => {
   const [microcontrollers, fuelSensors, gpsSensors, rfidSensors, microcontrollerLogs, a22Logs, rfidLogs, gpsLogs] = await Promise.all([
     prisma.microcontroller.findMany({ orderBy: { createdAt: 'desc' }, take: 200 }), prisma.fuelSensor.findMany({ orderBy: { createdAt: 'desc' }, take: 200 }), prisma.gps.findMany({ orderBy: { createdAt: 'desc' }, take: 200 }), prisma.rfid.findMany({ orderBy: { createdAt: 'desc' }, take: 200 }), prisma.microcontrollerLog.findMany({ orderBy: { createdAt: 'desc' }, take: 200 }), prisma.a22Log.findMany({ orderBy: { createdAt: 'desc' }, take: 200 }), prisma.rfidLog.findMany({ orderBy: { scannedAt: 'desc' }, take: 200 }), prisma.gpsLog.findMany({ orderBy: { measuredAt: 'desc' }, take: 200 })
   ]);
-  return { success: true, data: { microcontrollers, fuelSensors, gpsSensors, rfidSensors, microcontrollerLogs, a22Logs, rfidLogs, gpsLogs } };
+  const tables = { microcontrollers, fuelSensors, gpsSensors, rfidSensors, microcontrollerLogs, a22Logs, rfidLogs, gpsLogs };
+  const table = String(request.query?.table ?? '');
+  if (table && tables[table]) return { success: true, data: { table, ...listQuery(tables[table], request.query) } };
+  return { success: true, data: tables };
 });
 
 app.post('/api/:macId/health', async (request, reply) => {
