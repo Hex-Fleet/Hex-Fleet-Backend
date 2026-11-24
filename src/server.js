@@ -183,6 +183,29 @@ app.post('/api/admin/students/:studentId/rfid', async (request, reply) => {
   return reply.code(201).send({ success: true, data: mapping });
 });
 app.get('/api/admin/rfid-logs', async () => ({ success: true, data: await prisma.rfidLog.findMany({ orderBy: { scannedAt: 'desc' }, take: 200, include: { microcontroller: true, rfidSensor: true } }) }));
+app.get('/api/dashboard/buses', async () => {
+  const buses = await prisma.bus.findMany({ where: { isActive: true }, orderBy: { createdAt: 'desc' }, include: { controllerMappings: { where: { isActive: true }, include: { microcontroller: true } } } });
+  return { success: true, data: buses.map((bus) => ({ transId: bus.transId, name: bus.name, busNumber: bus.busNumber, registrationNo: bus.registrationNo, controller: bus.controllerMappings[0]?.microcontroller ? { transId: bus.controllerMappings[0].microcontroller.transId, name: bus.controllerMappings[0].microcontroller.name, macAddress: bus.controllerMappings[0].microcontroller.macAddress, online: deviceIsOnline(bus.controllerMappings[0].microcontroller.lastApiDataReceived) } : null })) };
+});
+app.get('/api/dashboard/buses/:busId', async (request, reply) => {
+  const bus = await prisma.bus.findUnique({ where: { transId: request.params.busId }, include: { controllerMappings: { where: { isActive: true }, include: { microcontroller: true } } } });
+  if (!bus) return reply.code(404).send({ success: false, error: 'Bus not found' });
+  const controller = bus.controllerMappings[0]?.microcontroller;
+  if (!controller) return { success: true, data: { transId: bus.transId, name: bus.name, busNumber: bus.busNumber, registrationNo: bus.registrationNo, controller: null, gps: [], fuel: null, mappedScans: [], unmappedScanCount: 0 } };
+  const [gpsLogs, fuel, mappedScans, unmappedScanCount] = await Promise.all([
+    prisma.gpsLog.findMany({ where: { microcontrollerId: controller.transId }, orderBy: { measuredAt: 'desc' }, take: 100 }),
+    prisma.fuelSensor.findFirst({ where: { microcontrollerId: controller.transId } }),
+    prisma.studentAttendanceLog.findMany({ where: { busId: bus.transId, studentId: { not: null } }, orderBy: { scannedAt: 'desc' }, take: 100, include: { student: true } }),
+    prisma.studentAttendanceLog.count({ where: { busId: bus.transId, studentId: null } })
+  ]);
+  return { success: true, data: { transId: bus.transId, name: bus.name, busNumber: bus.busNumber, registrationNo: bus.registrationNo, controller: { name: controller.name, macAddress: controller.macAddress, online: deviceIsOnline(controller.lastApiDataReceived), lastHealthCheckTime: controller.lastHealthCheckTime }, gps: gpsLogs.map((log) => ({ transId: log.transId, latitude: log.latitude, longitude: log.longitude, speed: log.speed, measuredAt: log.measuredAt })), fuel: fuel ? { litres: fuel.lastLitresMeasured, value: fuel.lastValueMeasured, updatedAt: fuel.lastUpdatedAt } : null, mappedScans: mappedScans.map((scan) => ({ transId: scan.transId, scannedAt: scan.scannedAt, cardUid: scan.cardUid, status: scan.attendanceStatus, student: scan.student ? `${scan.student.firstName}${scan.student.lastName ? ` ${scan.student.lastName}` : ''}` : null })), unmappedScanCount } };
+});
+app.get('/api/admin/raw-tables', async () => {
+  const [microcontrollers, fuelSensors, gpsSensors, rfidSensors, microcontrollerLogs, a22Logs, rfidLogs, gpsLogs] = await Promise.all([
+    prisma.microcontroller.findMany({ orderBy: { createdAt: 'desc' }, take: 200 }), prisma.fuelSensor.findMany({ orderBy: { createdAt: 'desc' }, take: 200 }), prisma.gps.findMany({ orderBy: { createdAt: 'desc' }, take: 200 }), prisma.rfid.findMany({ orderBy: { createdAt: 'desc' }, take: 200 }), prisma.microcontrollerLog.findMany({ orderBy: { createdAt: 'desc' }, take: 200 }), prisma.a22Log.findMany({ orderBy: { createdAt: 'desc' }, take: 200 }), prisma.rfidLog.findMany({ orderBy: { scannedAt: 'desc' }, take: 200 }), prisma.gpsLog.findMany({ orderBy: { measuredAt: 'desc' }, take: 200 })
+  ]);
+  return { success: true, data: { microcontrollers, fuelSensors, gpsSensors, rfidSensors, microcontrollerLogs, a22Logs, rfidLogs, gpsLogs } };
+});
 
 app.post('/api/:macId/health', async (request, reply) => {
   const device = await getDevice(request, reply);
