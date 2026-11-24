@@ -7,27 +7,267 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model Fleet {
-  id        String   @id @default(cuid())
-  name      String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  vehicles  Vehicle[]
+model Microcontroller {
+  transId             String   @id @default(uuid()) @map("transid") @db.Uuid
+  name                String
+  model               String?
+  macAddress          String   @unique @map("macaddress") @db.VarChar(12)
+  healthStatus        String   @default("UNKNOWN") @map("healthstatus")
+  lastHealthCheckTime DateTime? @map("lasthealthchecktime") @db.Timestamptz(6)
+  lastApiDataReceived DateTime? @map("lastapidatereceived") @db.Timestamptz(6)
+  settingsJson        Json     @default("{}") @map("settingsjson")
+  isFuelEnabled       Boolean  @default(false) @map("isfuelenabled")
+  isRfidEnabled       Boolean  @default(false) @map("isrfidenabled")
+  isGpsEnabled        Boolean  @default(false) @map("isgpsenabled")
+  isActive            Boolean  @default(true) @map("isactive")
+  createdBy           String?  @map("createdby")
+  createdAt           DateTime @default(now()) @map("createdat") @db.Timestamptz(6)
+  lastUpdatedBy       String?  @map("lastupdatedby")
+  lastUpdatedAt       DateTime @updatedAt @map("lastupdatedat") @db.Timestamptz(6)
+  fuelSensors         FuelSensor[]
+  gpsSensors          Gps[]
+  rfidSensors         Rfid[]
+  logs                MicrocontrollerLog[]
+  a22Logs             A22Log[]
+  rfidLogs            RfidLog[]
+  gpsLogs             GpsLog[]
+  busMappings         BusControllerMapping[]
+  attendanceLogs      StudentAttendanceLog[]
+  @@map("tbl_microcontroller")
 }
 
-model Vehicle {
-  id        String   @id @default(cuid())
-  fleetId   String
-  fleet     Fleet    @relation(fields: [fleetId], references: [id], onDelete: Cascade)
-  name      String
-  status    VehicleStatus @default(ACTIVE)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  @@index([fleetId])
+model FuelSensor {
+  transId             String   @id @default(uuid()) @map("transid") @db.Uuid
+  microcontrollerId   String   @map("microcontrollerid") @db.Uuid
+  name                String
+  model               String?
+  lastDataJson        Json?    @map("lastdatajson")
+  lastValueMeasured   Decimal? @map("lastvaluemeasured") @db.Decimal(12, 3)
+  lastLitresMeasured  Decimal? @map("lastlitresmeasured") @db.Decimal(12, 3)
+  calibrationDataJson Json?    @map("calibrationdatajson")
+  createdBy           String?  @map("createdby")
+  createdAt           DateTime @default(now()) @map("createdat") @db.Timestamptz(6)
+  lastUpdatedBy       String?  @map("lastupdatedby")
+  lastUpdatedAt       DateTime @updatedAt @map("lastupdatedat") @db.Timestamptz(6)
+  microcontroller     Microcontroller @relation(fields: [microcontrollerId], references: [transId], onDelete: Cascade)
+  calibrations        FuelCalibration[]
+  a22Logs             A22Log[]
+  @@index([microcontrollerId])
+  @@map("tbl_fuel_sensor")
 }
 
-enum VehicleStatus {
-  ACTIVE
-  INACTIVE
-  MAINTENANCE
+model Gps {
+  transId           String   @id @default(uuid()) @map("transid") @db.Uuid
+  microcontrollerId String   @map("microcontrollerid") @db.Uuid
+  name              String
+  model             String?
+  lastDataJson      Json?    @map("lastdatajson")
+  lastLatitude      Decimal? @map("lastlatitude") @db.Decimal(10, 7)
+  lastLongitude     Decimal? @map("lastlongitude") @db.Decimal(10, 7)
+  lastSpeed         Decimal? @map("lastspeed") @db.Decimal(10, 3)
+  createdBy         String?  @map("createdby")
+  createdAt         DateTime @default(now()) @map("createdat") @db.Timestamptz(6)
+  lastUpdatedBy     String?  @map("lastupdatedby")
+  lastUpdatedAt     DateTime @updatedAt @map("lastupdatedat") @db.Timestamptz(6)
+  microcontroller   Microcontroller @relation(fields: [microcontrollerId], references: [transId], onDelete: Cascade)
+  logs              GpsLog[]
+  @@index([microcontrollerId])
+  @@map("tbl_gps")
+}
+
+model Rfid {
+  transId           String   @id @default(uuid()) @map("transid") @db.Uuid
+  microcontrollerId String   @map("microcontrollerid") @db.Uuid
+  name              String
+  model             String?
+  lastScannedCard   String?  @map("lastscannedcard")
+  lastDataPacket    Json?    @map("lastdatapacket")
+  healthStatus      String?  @map("healthstatus")
+  lastScannedUuid   String?  @map("lastscanneduuid")
+  lastScannedAt     DateTime? @map("lastscannedat") @db.Timestamptz(6)
+  createdBy         String?  @map("createdby")
+  createdAt         DateTime @default(now()) @map("createdat") @db.Timestamptz(6)
+  lastUpdatedBy     String?  @map("lastupdatedby")
+  lastUpdatedAt     DateTime @updatedAt @map("lastupdatedat") @db.Timestamptz(6)
+  microcontroller   Microcontroller @relation(fields: [microcontrollerId], references: [transId], onDelete: Cascade)
+  logs              RfidLog[]
+  @@index([microcontrollerId])
+  @@map("tbl_rfid")
+}
+
+model MicrocontrollerLog {
+  transId           String   @id @default(uuid()) @map("transid") @db.Uuid
+  microcontrollerId String   @map("microcontrollerid") @db.Uuid
+  eventType         String   @map("eventtype")
+  status            String
+  dataJson          Json?    @map("datajson")
+  createdBy         String?  @map("createdby")
+  createdAt         DateTime @default(now()) @map("createdat") @db.Timestamptz(6)
+  lastUpdatedBy     String?  @map("lastupdatedby")
+  lastUpdatedAt     DateTime @updatedAt @map("lastupdatedat") @db.Timestamptz(6)
+  microcontroller   Microcontroller @relation(fields: [microcontrollerId], references: [transId], onDelete: Cascade)
+  @@index([microcontrollerId, createdAt])
+  @@map("tbl_microcontroller_logs")
+}
+
+model A22Log {
+  transId           String   @id @default(uuid()) @map("transid") @db.Uuid
+  microcontrollerId String   @map("microcontrollerid") @db.Uuid
+  fuelSensorId      String?  @map("fuelsensorid") @db.Uuid
+  distanceMm        Decimal? @map("distancemm") @db.Decimal(12, 3)
+  litresMeasured    Decimal? @map("litresmeasured") @db.Decimal(12, 3)
+  status            String
+  dataJson          Json?    @map("datajson")
+  measuredAt        DateTime? @map("measuredat") @db.Timestamptz(6)
+  createdBy         String?  @map("createdby")
+  createdAt         DateTime @default(now()) @map("createdat") @db.Timestamptz(6)
+  lastUpdatedBy     String?  @map("lastupdatedby")
+  lastUpdatedAt     DateTime @updatedAt @map("lastupdatedat") @db.Timestamptz(6)
+  microcontroller   Microcontroller @relation(fields: [microcontrollerId], references: [transId], onDelete: Cascade)
+  fuelSensor        FuelSensor? @relation(fields: [fuelSensorId], references: [transId], onDelete: SetNull)
+  @@index([microcontrollerId, createdAt])
+  @@map("tbl_a22_logs")
+}
+
+model RfidLog {
+  transId           String   @id @default(uuid()) @map("transid") @db.Uuid
+  microcontrollerId String   @map("microcontrollerid") @db.Uuid
+  rfidSensorId      String?  @map("rfidsensorid") @db.Uuid
+  cardUid           String   @map("carduid")
+  dataPacket        Json?    @map("datapacket")
+  scannedAt         DateTime @map("scannedat") @db.Timestamptz(6)
+  createdBy         String?  @map("createdby")
+  createdAt         DateTime @default(now()) @map("createdat") @db.Timestamptz(6)
+  lastUpdatedBy     String?  @map("lastupdatedby")
+  lastUpdatedAt     DateTime @updatedAt @map("lastupdatedat") @db.Timestamptz(6)
+  microcontroller   Microcontroller @relation(fields: [microcontrollerId], references: [transId], onDelete: Cascade)
+  rfidSensor        Rfid? @relation(fields: [rfidSensorId], references: [transId], onDelete: SetNull)
+  @@index([microcontrollerId, cardUid, scannedAt])
+  @@map("tbl_rfid_logs")
+}
+
+model GpsLog {
+  transId           String   @id @default(uuid()) @map("transid") @db.Uuid
+  microcontrollerId String   @map("microcontrollerid") @db.Uuid
+  gpsId             String?  @map("gpsid") @db.Uuid
+  latitude          Decimal? @db.Decimal(10, 7)
+  longitude         Decimal? @db.Decimal(10, 7)
+  altitude          Decimal? @db.Decimal(12, 3)
+  speed             Decimal? @db.Decimal(10, 3)
+  course            Decimal? @db.Decimal(10, 3)
+  satellites        Int?
+  hdop              Decimal? @db.Decimal(8, 3)
+  nmeaData          Json?    @map("nmeadata")
+  dataJson          Json?    @map("datajson")
+  measuredAt        DateTime? @map("measuredat") @db.Timestamptz(6)
+  createdBy         String?  @map("createdby")
+  createdAt         DateTime @default(now()) @map("createdat") @db.Timestamptz(6)
+  lastUpdatedBy     String?  @map("lastupdatedby")
+  lastUpdatedAt     DateTime @updatedAt @map("lastupdatedat") @db.Timestamptz(6)
+  microcontroller   Microcontroller @relation(fields: [microcontrollerId], references: [transId], onDelete: Cascade)
+  gps               Gps? @relation(fields: [gpsId], references: [transId], onDelete: SetNull)
+  @@index([microcontrollerId, createdAt])
+  @@map("tbl_gps_logs")
+}
+
+model Student {
+  transId       String   @id @default(uuid()) @map("transid") @db.Uuid
+  firstName     String   @map("firstname")
+  lastName      String?  @map("lastname")
+  admissionNo   String?  @map("admissionno")
+  institution   String?
+  className     String?  @map("classname")
+  phone         String?
+  isActive      Boolean  @default(true) @map("isactive")
+  createdBy     String?  @map("createdby")
+  createdAt     DateTime @default(now()) @map("createdat") @db.Timestamptz(6)
+  lastUpdatedBy String?  @map("lastupdatedby")
+  lastUpdatedAt DateTime @updatedAt @map("lastupdatedat") @db.Timestamptz(6)
+  rfidMappings  StudentRfidMapping[]
+  attendance    StudentAttendanceLog[]
+  @@map("tbl_students")
+}
+
+model StudentRfidMapping {
+  transId       String   @id @default(uuid()) @map("transid") @db.Uuid
+  studentId     String   @map("studentid") @db.Uuid
+  cardUid       String   @map("carduid")
+  isActive      Boolean  @default(true) @map("isactive")
+  createdBy     String?  @map("createdby")
+  createdAt     DateTime @default(now()) @map("createdat") @db.Timestamptz(6)
+  lastUpdatedBy String?  @map("lastupdatedby")
+  lastUpdatedAt DateTime @updatedAt @map("lastupdatedat") @db.Timestamptz(6)
+  student       Student  @relation(fields: [studentId], references: [transId], onDelete: Cascade)
+  @@unique([cardUid])
+  @@index([studentId])
+  @@map("tbl_student_rfid_mapping")
+}
+
+model Bus {
+  transId        String   @id @default(uuid()) @map("transid") @db.Uuid
+  name           String
+  busNumber      String   @map("busnumber")
+  registrationNo String?  @map("registrationno")
+  isActive       Boolean  @default(true) @map("isactive")
+  createdBy      String?  @map("createdby")
+  createdAt     DateTime @default(now()) @map("createdat") @db.Timestamptz(6)
+  lastUpdatedBy  String?  @map("lastupdatedby")
+  lastUpdatedAt  DateTime @updatedAt @map("lastupdatedat") @db.Timestamptz(6)
+  controllerMappings BusControllerMapping[]
+  attendanceLogs StudentAttendanceLog[]
+  @@map("tbl_buses")
+}
+
+model BusControllerMapping {
+  transId           String   @id @default(uuid()) @map("transid") @db.Uuid
+  busId             String   @map("busid") @db.Uuid
+  microcontrollerId String   @map("microcontrollerid") @db.Uuid
+  isActive          Boolean  @default(true) @map("isactive")
+  createdBy         String?  @map("createdby")
+  createdAt         DateTime @default(now()) @map("createdat") @db.Timestamptz(6)
+  lastUpdatedBy     String?  @map("lastupdatedby")
+  lastUpdatedAt     DateTime @updatedAt @map("lastupdatedat") @db.Timestamptz(6)
+  bus               Bus @relation(fields: [busId], references: [transId], onDelete: Cascade)
+  microcontroller   Microcontroller @relation(fields: [microcontrollerId], references: [transId], onDelete: Cascade)
+  @@unique([busId, microcontrollerId])
+  @@index([microcontrollerId, isActive])
+  @@map("tbl_bus_controller_mapping")
+}
+
+model StudentAttendanceLog {
+  transId           String   @id @default(uuid()) @map("transid") @db.Uuid
+  studentId         String?  @map("studentid") @db.Uuid
+  microcontrollerId String   @map("microcontrollerid") @db.Uuid
+  busId             String?  @map("busid") @db.Uuid
+  cardUid           String   @map("carduid")
+  attendanceStatus  String   @default("SCANNED") @map("attendancestatus")
+  scannedAt         DateTime @map("scannedat") @db.Timestamptz(6)
+  dataJson          Json?    @map("datajson")
+  createdBy         String?  @map("createdby")
+  createdAt         DateTime @default(now()) @map("createdat") @db.Timestamptz(6)
+  lastUpdatedBy     String?  @map("lastupdatedby")
+  lastUpdatedAt     DateTime @updatedAt @map("lastupdatedat") @db.Timestamptz(6)
+  student           Student? @relation(fields: [studentId], references: [transId], onDelete: SetNull)
+  microcontroller   Microcontroller @relation(fields: [microcontrollerId], references: [transId], onDelete: Cascade)
+  bus               Bus? @relation(fields: [busId], references: [transId], onDelete: SetNull)
+  @@index([microcontrollerId, scannedAt])
+  @@index([cardUid, scannedAt])
+  @@map("tbl_student_attendance_logs")
+}
+
+model FuelCalibration {
+  transId            String   @id @default(uuid()) @map("transid") @db.Uuid
+  fuelSensorId       String   @map("fuelsensorid") @db.Uuid
+  tankCapacityLitres Decimal  @map("tankcapacitylitres") @db.Decimal(12, 3)
+  sensorToLitreJson  Json     @map("sensortolitrejson")
+  calibrationPoints  Json?    @map("calibrationpoints")
+  offsetValue        Decimal? @map("offsetvalue") @db.Decimal(12, 3)
+  isActive           Boolean  @default(true) @map("isactive")
+  createdBy          String?  @map("createdby")
+  createdAt          DateTime @default(now()) @map("createdat") @db.Timestamptz(6)
+  lastUpdatedBy      String?  @map("lastupdatedby")
+  lastUpdatedAt      DateTime @updatedAt @map("lastupdatedat") @db.Timestamptz(6)
+  fuelSensor         FuelSensor @relation(fields: [fuelSensorId], references: [transId], onDelete: Cascade)
+  @@index([fuelSensorId, isActive])
+  @@map("tbl_fuel_calibrations")
 }
