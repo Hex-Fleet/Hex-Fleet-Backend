@@ -4,9 +4,20 @@ import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
 import { prisma } from '@hexfleet/db';
 
-const app = Fastify({ logger: true });
+const app = Fastify({ logger: false });
 await app.register(cors, { origin: true });
 await app.register(multipart, { limits: { fileSize: 10 * 1024 * 1024 } });
+
+app.addHook('onRequest', async (request) => {
+  request.hexFleetStartedAt = Date.now();
+});
+app.addHook('onResponse', async (request, reply) => {
+  const duration = Date.now() - (request.hexFleetStartedAt ?? Date.now());
+  console.log(`${request.method} ${request.url} -> ${reply.statusCode} (${duration}ms)`);
+});
+app.addHook('onError', async (request, _reply, error) => {
+  console.error(`${request.method} ${request.url} -> ERROR: ${error.message}`);
+});
 
 const now = () => new Date();
 const normalizeMac = (value) => String(value ?? '').replace(/[:-]/g, '').replace(/\s/g, '').toUpperCase();
@@ -299,3 +310,4 @@ app.addHook('onClose', async () => prisma.$disconnect());
 
 const port = Number(process.env.API_PORT || 4000);
 await app.listen({ port, host: '0.0.0.0' });
+console.log(`HexFleet API listening on port ${port}`);
