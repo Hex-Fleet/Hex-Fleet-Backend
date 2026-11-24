@@ -13,10 +13,12 @@ app.addHook('onRequest', async (request) => {
 });
 app.addHook('onResponse', async (request, reply) => {
   const duration = Date.now() - (request.hexFleetStartedAt ?? Date.now());
-  console.log(`${request.method} ${request.url} -> ${reply.statusCode} (${duration}ms)`);
+  const source = /^\/api\/[0-9A-Fa-f]{12}\/(health|rfid|telemetry)(?:\?|$)/.test(request.url) ? 'ESP' : 'WEB';
+  console.log(`[${source}] ${request.method} ${request.url} -> ${reply.statusCode} (${duration}ms)`);
 });
 app.addHook('onError', async (request, _reply, error) => {
-  console.error(`${request.method} ${request.url} -> ERROR: ${error.message}`);
+  const source = /^\/api\/[0-9A-Fa-f]{12}\/(health|rfid|telemetry)(?:\?|$)/.test(request.url) ? 'ESP' : 'WEB';
+  console.error(`[${source}] ${request.method} ${request.url} -> ERROR: ${error.message}`);
 });
 
 const now = () => new Date();
